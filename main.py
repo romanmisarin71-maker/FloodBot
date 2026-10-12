@@ -124,6 +124,24 @@ async def cb_question(call: CallbackQuery):
     await call.message.edit_text(QUESTION_PROMPT)
     await call.answer()
 
+# ============ ОТВЕТ ВЛАДЕЛЬЦА (должен быть выше общего хендлера) ============
+@router.message(F.from_user.id == OWNER_ID, F.reply_to_message)
+async def owner_reply(message: Message, bot: Bot):
+    target_user_id = owner_msg_map.get(message.reply_to_message.message_id)
+    if target_user_id is None:
+        return
+    text = (message.text or "").strip()
+    if text == "/ban":
+        add_to_blacklist(target_user_id)
+        await message.reply(BANNED_REPLY.format(user_id=target_user_id))
+        return
+    try:
+        await bot.send_message(target_user_id, f"💬 Ответ от владельца:\n\n{message.text}")
+        await message.reply("✅ Ответ отправлен.")
+    except Exception as e:
+        await message.reply(f"⚠️ Не удалось отправить: {e}")
+
+# ============ СООБЩЕНИЯ ПОЛЬЗОВАТЕЛЕЙ ============
 def _user_signature(user) -> str:
     username = f"@{user.username}" if user.username else "без юзернейма"
     return f"👤 {user.full_name} | {username} | id: {user.id}"
@@ -145,22 +163,6 @@ async def handle_user_message(message: Message, bot: Bot):
         await message.answer(ANKETA_ACCEPTED, reply_markup=main_menu_kb())
     else:
         await message.answer(QUESTION_ACCEPTED, reply_markup=main_menu_kb())
-
-@router.message(F.from_user.id == OWNER_ID, F.reply_to_message)
-async def owner_reply(message: Message, bot: Bot):
-    target_user_id = owner_msg_map.get(message.reply_to_message.message_id)
-    if target_user_id is None:
-        return
-    text = (message.text or "").strip()
-    if text == "/ban":
-        add_to_blacklist(target_user_id)
-        await message.reply(BANNED_REPLY.format(user_id=target_user_id))
-        return
-    try:
-        await bot.send_message(target_user_id, f"💬 Ответ от владельца:\n\n{message.text}")
-        await message.reply("✅ Ответ отправлен.")
-    except Exception as e:
-        await message.reply(f"⚠️ Не удалось отправить: {e}")
 
 # ============ FLASK ЗАГЛУШКА ============
 app = Flask(__name__)
