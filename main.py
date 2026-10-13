@@ -45,11 +45,15 @@ START_TEXT = "Выбери действие на кнопках ниже"
 
 HOUSE_INFO_TEXT = "🏠 Информация о хаусе\n\nДрим текст быстрее"
 
-RULES_TEXT = (
+RULES_MENU_TEXT = (
     "📜 Правила\n\n"
-    "━━━━━━━━━━━━━━━━━━\n"
-    "Правила Чата\n"
+    "Выбери, какие правила хочешь посмотреть:"
+)
+
+CHAT_RULES_TEXT = (
+    "📜 Правила Чата\n"
     "━━━━━━━━━━━━━━━━━━\n\n"
+
     "1.1 — Оскорбление\n"
     "Оскорбление какого-либо участника в любой форме (не считая дружеских, "
     "где оба человека понимают, что оскорбления не всерьёз) будут наказаны, "
@@ -125,10 +129,11 @@ RULES_TEXT = (
 
     "1.15 — Упоминание двух грехов\n"
     "Любое упоминание Жрима и Жрито без разрешения самого Дрима и Чито будет "
-    "наказано алмазом в задницу.\n\n"
+    "наказано алмазом в задницу."
+)
 
-    "━━━━━━━━━━━━━━━━━━\n"
-    "2.0 — Правила Сервера\n"
+SERVER_RULES_TEXT = (
+    "⚔️ Правила Сервера\n"
     "━━━━━━━━━━━━━━━━━━\n\n"
 
     "2.1 — Гриферство\n"
@@ -195,7 +200,7 @@ ANKETA_TEMPLATE = (
 ANKETA_ACCEPTED = "✅ Вашу анкету рассмотрят! Нужно подождать."
 QUESTION_PROMPT = "❓ Напишите свой вопрос, что вы хотите спросить?"
 QUESTION_ACCEPTED = "✅ Вопрос задан! На него обязательно вам ответят."
-BANNED_REPLY = "🚫 Пользователь {name} отправлен в БААААААН"
+BANNED_REPLY = "🚫 Пользователь {name} добавлен в БААААААН"
 UNBANNED_REPLY = "✅ Пользователь {name} разбанен"
 BANNED_NOTIFY = "🚫 Вы были забанены в боте."
 UNBANNED_NOTIFY = "✅ Вы были разбанены в боте."
@@ -214,7 +219,6 @@ def remove_from_blacklist(user_id: int):
 
 # ============ СОСТОЯНИЯ ============
 awaiting: Dict[int, str] = {}
-# message_id у бота (в чате админов) -> {"user_id": int, "name": str}
 owner_msg_map: Dict[int, Dict] = {}
 
 # ============ КЛАВИАТУРЫ ============
@@ -229,6 +233,25 @@ def main_menu_kb() -> InlineKeyboardMarkup:
 def back_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="back")],
+    ])
+
+def rules_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📜 Правила чата", callback_data="rules_chat")],
+        [InlineKeyboardButton(text="⚔️ Правила сервера", callback_data="rules_server")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back")],
+    ])
+
+def chat_rules_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚔️ Правила сервера", callback_data="rules_server")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="rules")],
+    ])
+
+def server_rules_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📜 Правила чата", callback_data="rules_chat")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="rules")],
     ])
 
 # ============ БОТ ============
@@ -252,7 +275,17 @@ async def cb_info(call: CallbackQuery):
 
 @router.callback_query(F.data == "rules")
 async def cb_rules(call: CallbackQuery):
-    await call.message.edit_text(RULES_TEXT, reply_markup=back_kb())
+    await call.message.edit_text(RULES_MENU_TEXT, reply_markup=rules_menu_kb())
+    await call.answer()
+
+@router.callback_query(F.data == "rules_chat")
+async def cb_rules_chat(call: CallbackQuery):
+    await call.message.edit_text(CHAT_RULES_TEXT, reply_markup=chat_rules_kb())
+    await call.answer()
+
+@router.callback_query(F.data == "rules_server")
+async def cb_rules_server(call: CallbackQuery):
+    await call.message.edit_text(SERVER_RULES_TEXT, reply_markup=server_rules_kb())
     await call.answer()
 
 @router.callback_query(F.data == "anketa")
@@ -283,7 +316,6 @@ async def admin_reply(message: Message, bot: Bot):
     target_name = entry["name"]
     text = (message.text or "").strip()
 
-    # --- /ban ---
     if text == "/ban":
         add_to_blacklist(target_user_id)
         await message.reply(BANNED_REPLY.format(name=target_name))
@@ -293,7 +325,6 @@ async def admin_reply(message: Message, bot: Bot):
             pass
         return
 
-    # --- /unban ---
     if text == "/unban":
         remove_from_blacklist(target_user_id)
         await message.reply(UNBANNED_REPLY.format(name=target_name))
@@ -315,7 +346,6 @@ def _user_signature(user) -> str:
     return f"👤 {user.full_name} | {username} | id: {user.id}"
 
 def _display_name(user) -> str:
-    """Имя для отображения в уведомлениях бан/разбан."""
     if user.username:
         return f"@{user.username}"
     return user.full_name or f"id{user.id}"
