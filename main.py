@@ -3,7 +3,7 @@ import logging
 import os
 import threading
 import time
-from typing import Dict
+from typing import Dict, Set
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.client.default import DefaultBotProperties
@@ -21,13 +21,25 @@ from flask import Flask
 # ============ КОНФИГ ============
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+# Чат, куда бот шлёт анкеты и вопросы
+OWNER_CHAT_ID = -1004371458244
+# Список ID админов через запятую, например: "123456789,987654321"
+ADMIN_IDS: Set[int] = set()
+_raw_admins = os.getenv("ADMIN_IDS", "")
+for _x in _raw_admins.split(","):
+    _x = _x.strip()
+    if _x:
+        try:
+            ADMIN_IDS.add(int(_x))
+        except ValueError:
+            pass
+
 PORT = int(os.getenv("PORT", 10000))
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не задан")
-if not OWNER_ID:
-    raise ValueError("OWNER_ID не задан")
+if not ADMIN_IDS:
+    raise ValueError("ADMIN_IDS не задан (нужен хотя бы один ID)")
 
 # ============ ТЕКСТЫ ============
 START_TEXT = "Привет! Я бот для приёма анкет в Хаус\n\nВыбери действие на кнопках ниже"
@@ -47,22 +59,21 @@ ANKETA_ACCEPTED = "✅ Вашу анкету рассмотрят! Нужно п
 QUESTION_PROMPT = "❓ Напишите свой вопрос, что вы хотите спросить?"
 QUESTION_ACCEPTED = "✅ Вопрос задан! На него обязательно вам ответят."
 BANNED_REPLY = "🚫 Пользователь {user_id} добавлен в БААААААН"
+UNBANNED_REPLY = "✅ Пользователь {user_id} разбанен"
+BANNED_NOTIFY = "🚫 Вы были забанены в боте."
+UNBANNED_NOTIFY = "✅ Вы были разбанены в боте."
 
-# ============ ЧС ============
-WEEK_SECONDS = 7 * 24 * 60 * 60
-_blacklist: Dict[int, float] = {}
-
-def _cleanup_blacklist():
-    now = time.time()
-    for uid in [u for u, ts in _blacklist.items() if now - ts > WEEK_SECONDS]:
-        _blacklist.pop(uid, None)
+# ============ ЧС (навсегда, до рестарта) ============
+_blacklist: Set[int] = set()
 
 def is_banned(user_id: int) -> bool:
-    _cleanup_blacklist()
     return user_id in _blacklist
 
 def add_to_blacklist(user_id: int):
-    _blacklist[user_id] = time.time()
+    _blacklist.add(user_id)
+
+def remove_from_blacklist(user_id: int):
+    _blacklist.discard(user_id)
 
 # ============ СОСТОЯНИЯ ============
 awaiting: Dict[int, str] = {}
@@ -124,17 +135,35 @@ async def cb_question(call: CallbackQuery):
     await call.message.edit_text(QUESTION_PROMPT)
     await call.answer()
 
-# ============ ОТВЕТ ВЛАДЕЛЬЦА (должен быть выше общего хендлера) ============
-@router.message(F.from_user.id == OWNER_ID, F.reply_to_message)
-async def owner_reply(message: Message, bot: Bot):
+# ============ ОТВЕТ ИЗ ЧАТА (должен быть выше общего хендлера) ============
+@router.message(F.chat.id == OWNER_CHAT_ID, F.from_user.id.in_(ADMIN_IDS), F.reply_to_message)
+async def admin_reply(message: Message, bot: Bot):
     target_user_id = owner_msg_map.get(message.reply_to_message.message_id)
     if target_user_id is None:
         return
     text = (message.text or "").strip()
+
+    # --- /ban ---
     if text == "/ban":
         add_to_blacklist(target_user_id)
         await message.reply(BANNED_REPLY.format(user_id=target_user_id))
+        try:
+            await bot.send_message(target_user_id, BANNED_NOTIFY)
+        except Exception:
+            pass
         return
+
+    # --- /unban ---
+    if text == "/unban":
+        remove_from_blacklist(target_user_id)
+        await message.reply(UNBANNED_REPLY.format(user_id=target_user_id))
+        try:
+            await bot.send_message(target_user_id, UNBANNED_NOTIFY)
+        except Exception:
+            pass
+        return
+
+    # --- обычный ответ — пересылаем юзеру ---
     try:
         await bot.send_message(target_user_id, f"💬 Ответ от владельца:\n\n{message.text}")
         await message.reply("✅ Ответ отправлен.")
@@ -148,6 +177,10 @@ def _user_signature(user) -> str:
 
 @router.message(F.text | F.caption)
 async def handle_user_message(message: Message, bot: Bot):
+    # Игнорируем сообщения из админ-чата, чтобы они не улетели как анкеты
+    if message.chat.id == OWNER_CHAT_ID:
+        return
+
     user_id = message.from_user.id
     if is_banned(user_id):
         return
@@ -157,7 +190,7 @@ async def handle_user_message(message: Message, bot: Bot):
     header = "📥 НОВАЯ АНКЕТА" if state == "anketa" else "❓ НОВЫЙ ВОПРОС"
     body = message.text or message.caption or ""
     owner_text = f"{header}\n\n{_user_signature(message.from_user)}\n\n———\n\n{body}"
-    sent = await bot.send_message(OWNER_ID, owner_text)
+    sent = await bot.send_message(OWNER_CHAT_ID, owner_text)
     owner_msg_map[sent.message_id] = user_id
     if state == "anketa":
         await message.answer(ANKETA_ACCEPTED, reply_markup=main_menu_kb())
