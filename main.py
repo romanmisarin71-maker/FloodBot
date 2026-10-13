@@ -18,12 +18,11 @@ from aiogram.types import (
 from dotenv import load_dotenv
 from flask import Flask
 
-# ============ КОНФИГ ============
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-# Чат, куда бот шлёт анкеты и вопросы
-OWNER_CHAT_ID = -1004371458244
-# Список ID админов через запятую, например: "123456789,987654321"
+OWNER_CHAT_ID = int(os.getenv("OWNER_CHAT_ID", "0"))
+if not OWNER_CHAT_ID:
+    raise ValueError("OWNER_CHAT_ID не задан")
 ADMIN_IDS: Set[int] = set()
 _raw_admins = os.getenv("ADMIN_IDS", "")
 for _x in _raw_admins.split(","):
@@ -42,9 +41,9 @@ if not ADMIN_IDS:
     raise ValueError("ADMIN_IDS не задан (нужен хотя бы один ID)")
 
 # ============ ТЕКСТЫ ============
-START_TEXT = "Привет! Я бот для приёма анкет в Хаус\n\nВыбери действие на кнопках ниже"
-HOUSE_INFO_TEXT = "🏠 Информация о хаусе\n\nДрим сука когда текст"
-RULES_TEXT = "📜 Правила\n\nИ правила нада дрим пиши давай"
+START_TEXT = "Выбери действие на кнопках ниже"
+HOUSE_INFO_TEXT = "🏠 Информация о хаусе\n\nДрим текст быстрее"
+RULES_TEXT = "📜 Правила\n\nПравила нужны чтобы их нарушать как нам говорил тайлер дерден"
 
 ANKETA_TEMPLATE = (
     "Отлично!\nНапишите достойную анкету, шаблон анкеты ниже:\n\n"
@@ -135,7 +134,7 @@ async def cb_question(call: CallbackQuery):
     await call.message.edit_text(QUESTION_PROMPT)
     await call.answer()
 
-# ============ ОТВЕТ ИЗ ЧАТА (должен быть выше общего хендлера) ============
+# ============ ОТВЕТ ИЗ ЧАТА ============
 @router.message(F.chat.id == OWNER_CHAT_ID, F.from_user.id.in_(ADMIN_IDS), F.reply_to_message)
 async def admin_reply(message: Message, bot: Bot):
     target_user_id = owner_msg_map.get(message.reply_to_message.message_id)
@@ -163,9 +162,8 @@ async def admin_reply(message: Message, bot: Bot):
             pass
         return
 
-    # --- обычный ответ — пересылаем юзеру ---
     try:
-        await bot.send_message(target_user_id, f"💬 Ответ от владельца:\n\n{message.text}")
+        await bot.send_message(target_user_id, f"💬 Ответ от администрации:\n\n{message.text}")
         await message.reply("✅ Ответ отправлен.")
     except Exception as e:
         await message.reply(f"⚠️ Не удалось отправить: {e}")
@@ -177,7 +175,6 @@ def _user_signature(user) -> str:
 
 @router.message(F.text | F.caption)
 async def handle_user_message(message: Message, bot: Bot):
-    # Игнорируем сообщения из админ-чата, чтобы они не улетели как анкеты
     if message.chat.id == OWNER_CHAT_ID:
         return
 
@@ -197,7 +194,7 @@ async def handle_user_message(message: Message, bot: Bot):
     else:
         await message.answer(QUESTION_ACCEPTED, reply_markup=main_menu_kb())
 
-# ============ FLASK ЗАГЛУШКА ============
+# ============ FLASK ============
 app = Flask(__name__)
 
 @app.route("/")
@@ -218,7 +215,5 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    # Flask в отдельном потоке
     threading.Thread(target=run_flask, daemon=True).start()
-    # Бот в основном
     asyncio.run(main())
